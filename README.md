@@ -1,4 +1,4 @@
-# GradsFoundry — Orders API (template repo)
+# Grads Foundry — Orders API (template repo)
 
 This is the repo every student's Loop 1 ticket starts from. It's a real, small
 Express API — not a "hello world." Your job on Day 1 is to pick up the ticket
