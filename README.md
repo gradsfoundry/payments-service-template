@@ -10,14 +10,12 @@ a real feature to it; Sprint 2's is to fix a bug in what you just shipped.
 - `main.py` — the API. `GET /api/health`, `GET /api/orders`, `GET /api/orders/{id}`.
 - `frontend/index.html` — a bare page that calls the API and lists orders.
 - `tests/` — run against a real Postgres in CI, not mocked.
-- `Dockerfile` — packages the app as a normal, long-lived HTTP service (no
-  serverless-specific rewrites needed — see `infra/DESIGN.md` for why that
-  used to be a problem and isn't anymore).
+- `Dockerfile` — packages the app as a normal, long-lived HTTP service.
 - `.github/workflows/ci-cd.yml` — every push to `main` builds, tests
   against a real database, and deploys straight to your **dev** environment.
-- `.github/workflows/promote-to-prod.yml` — a separate, manual, approval-gated
-  action that ships the *exact* image already verified in dev to **prod**.
-  This is the "change ticket" step — see `infra/DESIGN.md`.
+- `.github/workflows/promote-to-prod.yml` — fires when a PR into the
+  protected `prod` branch is merged, and ships the *exact* image already
+  verified in dev to **prod**. That merge approval is your change ticket.
 
 ## Sprint 1 ticket (once the sandbox exists)
 
@@ -59,9 +57,9 @@ docker run -p 8080:8080 -e DATABASE_URL=... orders-api
 
 There's no separate signup step. Your first push to `main` *is* the
 onboarding step — it builds, tests against a real database, and deploys to
-your own namespaced `dev` environment via GitHub's OIDC federation (no AWS
-keys ever handed to you). Promoting to `prod` is a deliberate, separate,
-approval-gated action once you're ready — not automatic.
+your own `dev` environment. To go live: open a PR from `main` into `prod`
+and request review — once it's approved and merged, `prod` updates
+automatically to that exact tested build.
 
 ## Repo secrets/variables this pipeline expects
 
@@ -74,6 +72,3 @@ Per-student identity aside, most of this is org-level and set once:
 | `ECS_CLUSTER` | variable | org-level | The shared cluster name |
 | `COHORT_TAG` | variable | org-level | e.g. `pilot-2026-10` — cost tracking only |
 | `DEV_BASE_URL` / `PROD_BASE_URL` | variable | per-repo | This student's CloudFront URL for each environment, used only by the post-deploy smoke test |
-
-See `infra/DESIGN.md` for the full architecture — what's shared across
-students vs. namespaced per student, and per environment.
