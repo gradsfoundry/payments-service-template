@@ -1,14 +1,29 @@
-# Grads Foundry — Orders Service (template repo)
+# Grads Foundry — Payments Service (template repo)
 
 This is the app every student's tickets land against. It's a real, small,
-**already-running** web app — Python (FastAPI) API + a static frontend,
-backed by Postgres — not a from-scratch build. Sprint 1's ticket is to add
-a real feature to it; Sprint 2's is to fix a bug in what you just shipped.
+**already-running** payments API — Python (FastAPI) backed by Postgres, with
+a static frontend — not a from-scratch build. Sprint 1's ticket is to add a
+real feature to it; Sprint 2's is to fix a bug in what you just shipped.
+
+Read `main.py` before doing anything else. `POST /api/payments` is the
+reference pattern for the rest of this system — study how it handles two
+things every real payments API has to get right:
+
+1. **Idempotency.** Every request carries an `Idempotency-Key` header. Retry
+   the same request with the same key (e.g. because your first attempt
+   timed out) and you get back the *original* result — the money moves
+   once, not twice.
+2. **Safe concurrent balance updates.** Both accounts involved get
+   row-locked, always in the same order, before either balance changes —
+   otherwise two transfers between the same two accounts running at the
+   same time can corrupt both balances, or deadlock each other.
+
+Both are proven by tests, not just claimed — see `tests/test_api.py`.
 
 ## What's here
 
-- `main.py` — the API. `GET /api/health`, `GET /api/orders`, `GET /api/orders/{id}`.
-- `frontend/index.html` — a bare page that calls the API and lists orders.
+- `main.py` — the API: `GET /api/health`, `GET /api/accounts/{id}`, `POST /api/payments`, `GET /api/payments/{id}`.
+- `frontend/index.html` — a bare page listing account balances.
 - `tests/` — run against a real Postgres in CI, not mocked.
 - `Dockerfile` — packages the app as a normal, long-lived HTTP service.
 - `.github/workflows/ci-cd.yml` — every push to `main` builds, tests
@@ -19,16 +34,18 @@ a real feature to it; Sprint 2's is to fix a bug in what you just shipped.
 
 ## Sprint 1 ticket (once the sandbox exists)
 
-Add order attachments: a way to upload a receipt/invoice file for an order
-and get it back later.
+Add payment disputes: a way to flag a completed payment as disputed and
+attach evidence.
 
-- `POST /api/orders/{id}/attachments` — upload a file, store it in S3.
-- `GET /api/orders/{id}/attachments` — return a presigned download URL.
-- Add the upload button and a download link to `frontend/index.html`
-  (there's a placeholder "Attachment" column already there).
+- `POST /api/payments/{id}/disputes` — open a dispute, with an uploaded
+  file (receipt/screenshot) stored in S3.
+- `GET /api/payments/{id}/disputes` — return the dispute's status and a
+  presigned download URL for the evidence.
 
-This is real API design, not filled-in boilerplate: think about the request
-shape, what status codes make sense, and what happens if someone re-uploads.
+Think about real edge cases before you code: can a payment be disputed
+twice? What happens if the payment doesn't exist, or isn't `completed` yet?
+Does re-uploading replace the evidence or reject the request? This is real
+API design, not filled-in boilerplate.
 
 ## Running it locally
 
@@ -49,8 +66,17 @@ DATABASE_URL=postgresql://postgres:test@localhost:5432/gradsfoundry uvicorn main
 Or as a container:
 
 ```
-docker build -t orders-api .
-docker run -p 8080:8080 -e DATABASE_URL=... orders-api
+docker build -t payments-api .
+docker run -p 8080:8080 -e DATABASE_URL=... payments-api
+```
+
+Try the idempotency guarantee yourself:
+
+```
+curl -X POST localhost:8080/api/payments -H "Idempotency-Key: test-1" \
+  -H "Content-Type: application/json" \
+  -d '{"from_account_id":1,"to_account_id":2,"amount_cents":500}'
+# run the exact same command again -- same payment comes back, balance doesn't move twice
 ```
 
 ## How you get "access" to the sandbox
