@@ -1,0 +1,17 @@
+{
+  "name": "gradsfoundry-orders-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GradsFoundry template repo — the starter app every student's Loop 1 ticket builds on.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test 'test/**/*.test.js'"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "supertest": "^7.0.0"
+  }
+}
