@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Orders — Grads Foundry</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 60px auto; padding: 0 20px; color: #1c1c1c; }
+    h1 { font-size: 22px; }
+    #status { font-size: 13px; color: #666; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #e5e5e5; font-size: 14px; }
+    th { color: #666; font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  </style>
+</head>
+<body>
+  <h1>Orders</h1>
+  <p id="status">Checking API status...</p>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>Status</th><th>Attachment</th></tr></thead>
+    <tbody id="orders"><tr><td colspan="4">Loading...</td></tr></tbody>
+  </table>
+
+  <script>
+    fetch('/api/health')
+      .then(r => r.json())
+      .then(d => {
+        document.getElementById('status').textContent =
+          `API: ${d.status} · database connected: ${d.db_connected}`;
+      })
+      .catch(() => {
+        document.getElementById('status').textContent = 'API unreachable.';
+      });
+
+    fetch('/api/orders')
+      .then(r => r.json())
+      .then(orders => {
+        const tbody = document.getElementById('orders');
+        tbody.innerHTML = orders.map(o => `
+          <tr>
+            <td>${o.id}</td>
+            <td>${o.item}</td>
+            <td>${o.status}</td>
+            <td>—</td>
+          </tr>
+        `).join('');
+        // The "Attachment" column above is a placeholder -- Sprint 1's
+        // ticket is to make this an actual upload/download link.
+      })
+      .catch(() => {
+        document.getElementById('orders').innerHTML = '<tr><td colspan="4">Could not load orders.</td></tr>';
+      });
+  </script>
+</body>
+</html>

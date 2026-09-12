@@ -1,0 +1,65 @@
+name: Promote to prod
+
+# Deliberately separate from ci-cd.yml and never automatic. Takes an image
+# already built and verified in dev and ships that EXACT image to prod --
+# never rebuilds. The `environment: prod` gate below is where a required
+# reviewer is configured (repo Settings > Environments) -- approving that
+# review *is* the change-ticket approval. See infra/DESIGN.md.
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "The git SHA of the image already running in dev (check the dev deploy's Actions run, or `git log`)"
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: gradsfoundry/${{ github.event.repository.name }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+  ECS_SERVICE: gradsfoundry-${{ github.event.repository.name }}-prod
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: prod   # required reviewer lives here -- this IS the change ticket gate
+    steps:
+      - name: Assume AWS role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Confirm the image actually exists in ECR (don't promote a typo)
+        id: image
+        run: |
+          aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids imageTag="${{ inputs.image_tag }}" >/dev/null
+          REGISTRY=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com
+          echo "uri=$REGISTRY/$ECR_REPOSITORY:${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy that exact image to the prod ECS service
+        run: |
+          TASK_DEF=$(aws ecs describe-task-definition --task-definition "$ECS_SERVICE" --query taskDefinition)
+          NEW_TASK_DEF=$(echo "$TASK_DEF" | jq --arg IMAGE "${{ steps.image.outputs.uri }}" \
+            '.containerDefinitions[0].image = $IMAGE | {family, containerDefinitions, networkMode, requiresCompatibilities, cpu, memory, executionRoleArn, taskRoleArn}')
+          echo "$NEW_TASK_DEF" > new-task-def.json
+          NEW_REVISION_ARN=$(aws ecs register-task-definition --cli-input-json file://new-task-def.json --query "taskDefinition.taskDefinitionArn" --output text)
+
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "$NEW_REVISION_ARN" \
+            --force-new-deployment
+
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
+
+      - name: Smoke-test prod
+        run: |
+          sleep 10
+          curl -sf "${{ vars.PROD_BASE_URL }}/api/health" || (echo "Health check failed — prod did not come up healthy" && exit 1)

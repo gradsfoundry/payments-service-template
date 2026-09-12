@@ -1,5 +1,8 @@
-node_modules
-test
+.venv
+__pycache__
+tests
 .git
 .github
+infra
+frontend
 *.md

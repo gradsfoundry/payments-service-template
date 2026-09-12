@@ -1,7 +1,9 @@
-name: CI/CD
+name: CI/CD (deploy to dev)
 
-# First push to main (or a manual run) is the actual "onboarding" step —
+# First push to main (or a manual run) is the actual "onboarding" step --
 # there is no separate signup flow. See README.md and infra/DESIGN.md.
+# This deploys to `dev` only. Going live is a separate, deliberate act --
+# see promote-to-prod.yml.
 on:
   push:
     branches: [main]
@@ -13,22 +15,35 @@ permissions:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
-  # Namespaced by this repo's own name -- no per-student vars to hand-set.
   ECR_REPOSITORY: gradsfoundry/${{ github.event.repository.name }}
-  LAMBDA_FUNCTION_NAME: gradsfoundry-${{ github.event.repository.name }}
-  COHORT_TAG: ${{ vars.COHORT_TAG }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+  ECS_SERVICE: gradsfoundry-${{ github.event.repository.name }}-dev
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: gradsfoundry
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-python@v5
         with:
-          node-version: '20'
-          cache: 'npm'
-      - run: npm ci
-      - run: npm test
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements-dev.txt
+      - run: pytest tests/ -v
+        env:
+          DATABASE_URL: postgresql://postgres:test@localhost:5432/gradsfoundry
 
   build-and-push:
     needs: test
@@ -45,13 +60,12 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Ensure this student's ECR repo exists
-        # Idempotent: first push creates it, every push after this is a no-op.
         run: |
           aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" >/dev/null 2>&1 || \
           aws ecr create-repository \
             --repository-name "$ECR_REPOSITORY" \
             --image-scanning-configuration scanOnPush=true \
-            --tags Key=gradsfoundry:cohort,Value="$COHORT_TAG"
+            --tags Key=gradsfoundry:cohort,Value="${{ vars.COHORT_TAG }}"
 
       - name: Log in to ECR
         id: ecr-login
@@ -67,9 +81,10 @@ jobs:
           docker push "$IMAGE_URI"
           echo "uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
 
-  deploy:
+  deploy-dev:
     needs: build-and-push
     runs-on: ubuntu-latest
+    environment: dev   # no required reviewers -- auto-deploys
     steps:
       - name: Assume AWS role via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -77,44 +92,27 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Create the Lambda function on first deploy, else update it
-        # See infra/DESIGN.md for why a Function URL, and why the execution
-        # role is shared (org-level) while the deploy role above is not.
+      - name: Deploy the new image to the dev ECS service
+        # infra/DESIGN.md covers the one-time ECS service/task-definition
+        # setup this assumes already exists per student per environment.
         run: |
-          if aws lambda get-function --function-name "$LAMBDA_FUNCTION_NAME" >/dev/null 2>&1; then
-            aws lambda update-function-code \
-              --function-name "$LAMBDA_FUNCTION_NAME" \
-              --image-uri "${{ needs.build-and-push.outputs.image }}"
-          else
-            aws lambda create-function \
-              --function-name "$LAMBDA_FUNCTION_NAME" \
-              --package-type Image \
-              --code ImageUri="${{ needs.build-and-push.outputs.image }}" \
-              --role "${{ vars.LAMBDA_EXECUTION_ROLE_ARN }}" \
-              --timeout 10 \
-              --memory-size 256 \
-              --tags gradsfoundry:cohort="$COHORT_TAG"
+          TASK_DEF=$(aws ecs describe-task-definition --task-definition "$ECS_SERVICE" --query taskDefinition)
+          NEW_TASK_DEF=$(echo "$TASK_DEF" | jq --arg IMAGE "${{ needs.build-and-push.outputs.image }}" \
+            '.containerDefinitions[0].image = $IMAGE | {family, containerDefinitions, networkMode, requiresCompatibilities, cpu, memory, executionRoleArn, taskRoleArn}')
+          echo "$NEW_TASK_DEF" > new-task-def.json
+          NEW_REVISION_ARN=$(aws ecs register-task-definition --cli-input-json file://new-task-def.json --query "taskDefinition.taskDefinitionArn" --output text)
 
-            aws lambda create-function-url-config \
-              --function-name "$LAMBDA_FUNCTION_NAME" \
-              --auth-type NONE
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "$NEW_REVISION_ARN" \
+            --force-new-deployment
 
-            aws lambda add-permission \
-              --function-name "$LAMBDA_FUNCTION_NAME" \
-              --statement-id FunctionURLAllowPublicAccess \
-              --action lambda:InvokeFunctionUrl \
-              --principal "*" \
-              --function-url-auth-type NONE
-          fi
-
-          aws lambda wait function-updated --function-name "$LAMBDA_FUNCTION_NAME"
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
 
       - name: Smoke-test the redeploy
-        # This is the gate described in the program design: a deploy isn't
-        # "done" until the health check actually passes against the live app.
+        # A deploy isn't "done" until the health check actually passes
+        # against the live dev environment.
         run: |
-          FUNCTION_URL=$(aws lambda get-function-url-config \
-            --function-name "$LAMBDA_FUNCTION_NAME" \
-            --query FunctionUrl --output text)
           sleep 10
-          curl -sf "${FUNCTION_URL}health" || (echo "Health check failed — deploy did not verify healthy" && exit 1)
+          curl -sf "${{ vars.DEV_BASE_URL }}/api/health" || (echo "Health check failed — deploy did not verify healthy" && exit 1)
