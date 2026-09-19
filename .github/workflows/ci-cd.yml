@@ -84,7 +84,12 @@ jobs:
   deploy-dev:
     needs: build-and-push
     runs-on: ubuntu-latest
-    environment: dev   # no required reviewers -- auto-deploys
+    # Deliberately NOT using GitHub's `environment:` feature here -- it
+    # isn't available on private repos on the Free plan at all (not just
+    # the required-reviewers part), and we don't need it: DEV_BASE_URL and
+    # PROD_BASE_URL are already two separately-named repo variables, not
+    # one variable scoped two ways through Environments. Auto-deploys on
+    # every push -- prod's gate is the protected `prod` branch instead.
     steps:
       - name: Assume AWS role via OIDC
         uses: aws-actions/configure-aws-credentials@v4
