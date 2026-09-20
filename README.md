@@ -1,6 +1,6 @@
 # Grads Foundry — Payments Service (template repo)
 
-This is the app every student's tickets land against. It's a real, small,
+This is the app every grad's tickets land against. It's a real, small,
 **already-running** payments API — Python (FastAPI) backed by Postgres, with
 a static frontend — not a from-scratch build. Sprint 1's ticket is to add a
 real feature to it; Sprint 2's is to fix a bug in what you just shipped.
@@ -89,12 +89,12 @@ automatically to that exact tested build.
 
 ## Repo secrets/variables this pipeline expects
 
-Per-student identity aside, most of this is org-level and set once:
+Per-grad identity aside, most of this is org-level and set once:
 
 | Name | Type | Scope | What it is |
 |---|---|---|---|
-| `AWS_ROLE_ARN` | secret | per-repo | This student's scoped deploy role (both dev and prod) |
+| `AWS_ROLE_ARN` | secret | per-repo | This grad's scoped deploy role (both dev and prod) |
 | `AWS_REGION` | variable | org-level | e.g. `ap-south-1` |
 | `ECS_CLUSTER` | variable | org-level | The shared cluster name |
 | `COHORT_TAG` | variable | org-level | e.g. `pilot-2026-10` — cost tracking only |
-| `DEV_BASE_URL` / `PROD_BASE_URL` | variable | per-repo | This student's CloudFront URL for each environment, used only by the post-deploy smoke test |
+| `DEV_BASE_URL` / `PROD_BASE_URL` | variable | per-repo | This grad's CloudFront URL for each environment, used only by the post-deploy smoke test |

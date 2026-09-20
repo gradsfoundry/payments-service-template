@@ -59,7 +59,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Ensure this student's ECR repo exists
+      - name: Ensure this grad's ECR repo exists
         run: |
           aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" >/dev/null 2>&1 || \
           aws ecr create-repository \
@@ -99,7 +99,7 @@ jobs:
 
       - name: Deploy the new image to the dev ECS service
         # infra/DESIGN.md covers the one-time ECS service/task-definition
-        # setup this assumes already exists per student per environment.
+        # setup this assumes already exists per grad per environment.
         run: |
           TASK_DEF=$(aws ecs describe-task-definition --task-definition "$ECS_SERVICE" --query taskDefinition)
           NEW_TASK_DEF=$(echo "$TASK_DEF" | jq --arg IMAGE "${{ needs.build-and-push.outputs.image }}" \
